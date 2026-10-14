@@ -1,0 +1,25 @@
+{
+  "name": "codex-novelai-image",
+  "version": "0.1.1",
+  "description": "在 Codex 中使用 NovelAI 生图，并管理本地画师串和当前风格。",
+  "author": {
+    "name": "Local"
+  },
+  "license": "MIT",
+  "keywords": ["NovelAI", "image generation", "artist styles", "prompt"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "requires_local_executor": true,
+  "interface": {
+    "displayName": "NovelAI 图片",
+    "shortDescription": "NovelAI 生图与画师串管理",
+    "longDescription": "输入 NovelAI API Token，管理本地画师串文件，选择当前画师串并生成图片。未指定画师串时自动使用当前选择。",
+    "developerName": "Local",
+    "category": "Image generation",
+    "capabilities": ["Generate images", "Manage local artist styles"],
+    "defaultPrompt": [
+      "打开 NovelAI 图片设置，配置 API Token 和画师串",
+      "使用当前画师串生成一张图片"
+    ]
+  }
+}

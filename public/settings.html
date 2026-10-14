@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>NovelAI 图片</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #171923; color: #f1f3f8; }
+    body { margin: 0; padding: 22px; background: #171923; }
+    main { max-width: 820px; margin: auto; }
+    section { background: #202332; border: 1px solid #3d455c; border-radius: 12px; padding: 18px; margin-bottom: 14px; }
+    h1 { font-size: 22px; margin: 0 0 16px; } h2 { font-size: 16px; margin: 0 0 12px; }
+    label { display: block; color: #c8cede; font-size: 13px; margin: 10px 0 5px; }
+    input, textarea, select { width: 100%; box-sizing: border-box; border: 1px solid #59627a; border-radius: 7px; background: #171923; color: inherit; padding: 9px 10px; }
+    textarea { min-height: 76px; resize: vertical; font-family: ui-monospace, Consolas, monospace; }
+    button { border: 1px solid #66718d; border-radius: 7px; background: #2c3449; color: inherit; padding: 8px 12px; cursor: pointer; margin: 8px 6px 0 0; }
+    button.primary { background: #4567bd; border-color: #6689e2; } button.danger { color: #ffb4b4; }
+    .row { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; } .grow { flex: 1 1 220px; }
+    .hint { color: #aab2c6; font-size: 12px; line-height: 1.5; } .status { min-height: 22px; color: #a9d5ff; white-space: pre-wrap; }
+    .error { color: #ff9d9d; } .style { border-top: 1px solid #3d455c; padding: 10px 0; } .style:first-child { border-top: 0; }
+    .style-head { display: flex; gap: 8px; justify-content: space-between; align-items: center; } .tag { color: #9fd1ff; font-size: 12px; }
+    code { color: #c6d5ff; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>NovelAI 图片</h1>
+  <div id="status" class="status"></div>
+  <section>
+    <h2>API 设置</h2>
+    <label for="token">NovelAI Persistent API Token</label>
+    <input id="token" type="password" autocomplete="off" placeholder="输入后点击保存；不会回显 Token">
+    <button id="save-token" class="primary">保存 API Token</button>
+    <span id="token-state" class="hint"></span>
+  </section>
+  <section>
+    <h2>画师串 / 风格库</h2>
+    <p class="hint">使用本地 JSON 文件保存，默认使用本插件目录下的 <code>artists.json</code>，与 DSH 插件分离。画师串文本按原文保存，不会自动修改权重或标点。</p>
+    <div class="row">
+      <div class="grow"><label for="style-name">名称</label><input id="style-name" placeholder="例如：喜欢的画师组合"></div>
+      <div class="grow"><label for="style-group">分组</label><input id="style-group" value="Default"></div>
+    </div>
+    <label for="artist-text">画师串原文</label>
+    <textarea id="artist-text" placeholder="直接粘贴 NovelAI 画师串原文"></textarea>
+    <label for="style-prompt">附加提示词（可选）</label>
+    <input id="style-prompt" placeholder="可选的风格提示词">
+    <label for="style-negative">默认负面提示词（可选）</label>
+    <input id="style-negative" placeholder="可选">
+    <button id="save-style" class="primary">保存画师串</button>
+    <button id="clear-style">清空编辑</button>
+    <div class="row"><div class="grow"><label for="style-query">搜索</label><input id="style-query" placeholder="名称、分组或画师串"></div><button id="refresh">刷新</button></div>
+    <div id="styles"></div>
+  </section>
+  <section>
+    <h2>快速生成</h2>
+    <label for="prompt">提示词</label><textarea id="prompt" placeholder="输入正向提示词；不指定画师串时自动使用当前选择"></textarea>
+    <label for="negative">负面提示词（可选）</label><input id="negative" placeholder="留空时使用当前画师串的默认负面提示词">
+    <label for="generate-style">画师串（可选）</label><input id="generate-style" placeholder="留空 = 当前选择">
+    <button id="generate" class="primary">生成图片</button>
+    <div id="result" class="hint"></div>
+  </section>
+</main>
+<script>
+(() => {
+  let requestId = 0
+  const pending = new Map()
+  const $ = (id) => document.getElementById(id)
+  const status = (message, error = false) => { $('status').textContent = message || ''; $('status').className = error ? 'status error' : 'status' }
+  const call = async (name, args = {}) => {
+    if (window.openai && typeof window.openai.callTool === 'function') {
+      const result = await window.openai.callTool(name, args)
+      return result?.structuredContent || result
+    }
+    const localKey = document.documentElement.dataset.localSettingsKey || ''
+    if (localKey) {
+      const routes = { nai_settings_get: '/api/settings/get', nai_settings_save: '/api/settings/save', nai_style_list: '/api/styles/list', nai_style_save: '/api/styles/save', nai_style_select: '/api/styles/select', nai_style_delete: '/api/styles/delete', nai_generate_image: '/api/generate' }
+      const route = routes[name]
+      if (!route) throw new Error('独立设置窗口不支持此操作：' + name)
+      const response = await fetch(route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Local-Settings-Key': localKey }, body: JSON.stringify(args) })
+      const value = await response.json().catch(() => ({}))
+      if (!response.ok || value?.error) throw new Error(value?.error || '请求失败')
+      return value
+    }
+    const id = ++requestId
+    const promise = new Promise((resolve, reject) => pending.set(id, { resolve, reject }))
+    window.parent.postMessage({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }, '*')
+    return promise
+  }
+  window.addEventListener('message', (event) => {
+    const message = event.data
+    if (!message || message.jsonrpc !== '2.0' || message.id === undefined) return
+    const task = pending.get(message.id); if (!task) return; pending.delete(message.id)
+    if (message.error) task.reject(new Error(message.error.message || '调用工具失败'))
+    else if (message.result?.isError) task.reject(new Error(message.result.content?.[0]?.text || '调用工具失败'))
+    else task.resolve(message.result?.structuredContent || message.result)
+  })
+  const run = async (action) => { try { return await action() } catch (error) { status(error.message || String(error), true); throw error } }
+  const refreshToken = async () => { const value = await call('nai_settings_get'); $('token-state').textContent = value.configured ? '已配置' : '尚未配置' }
+  const styleArgs = () => ({ group: '', query: $('style-query').value })
+  const refreshStyles = async () => {
+    const value = await call('nai_style_list', styleArgs())
+    const root = $('styles'); root.textContent = ''
+    if (!value.styles?.length) { root.innerHTML = '<p class="hint">暂无画师串。</p>'; return }
+    value.styles.forEach((style) => {
+      const item = document.createElement('div'); item.className = 'style'
+      const head = document.createElement('div'); head.className = 'style-head'
+      const title = document.createElement('strong'); title.textContent = style.name
+      const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = style.current ? '当前使用' : style.group
+      head.append(title, tag); item.append(head)
+      const promptText = [style.artistText, style.basePrompt, style.prompt].filter((value) => typeof value === 'string' && value.trim()).join(' ')
+      const text = document.createElement('div'); text.className = 'hint'; text.textContent = promptText || '(空)'; item.append(text)
+      const select = document.createElement('button'); select.textContent = style.current ? '当前选择' : '设为当前'; select.disabled = style.current; select.onclick = () => run(async () => { await call('nai_style_select', { id: style.id }); status('已切换当前画师串：' + style.name); await refreshStyles() })
+      const edit = document.createElement('button'); edit.textContent = '编辑'; edit.onclick = () => { $('style-name').value = style.name; $('style-group').value = style.group; $('artist-text').value = style.artistText || ''; $('style-prompt').value = style.prompt || ''; $('style-negative').value = style.negativePrompt || ''; $('save-style').dataset.id = style.id }
+      const del = document.createElement('button'); del.className = 'danger'; del.textContent = '删除'; del.onclick = () => run(async () => { await call('nai_style_delete', { id: style.id }); status('已删除：' + style.name); await refreshStyles() })
+      item.append(select, edit, del); root.append(item)
+    })
+  }
+  $('save-token').onclick = () => run(async () => { await call('nai_settings_save', { token: $('token').value }); $('token').value = ''; status('API Token 已保存'); await refreshToken() })
+  $('save-style').onclick = () => run(async () => { const id = $('save-style').dataset.id; await call('nai_style_save', { id, name: $('style-name').value, group: $('style-group').value, artistText: $('artist-text').value, prompt: $('style-prompt').value, negativePrompt: $('style-negative').value }); delete $('save-style').dataset.id; status('画师串已保存'); await refreshStyles() })
+  $('clear-style').onclick = () => { ['style-name','artist-text','style-prompt','style-negative'].forEach((id) => $(id).value = ''); $('style-group').value = 'Default'; delete $('save-style').dataset.id }
+  $('refresh').onclick = () => run(refreshStyles); $('style-query').oninput = () => run(refreshStyles)
+  $('generate').onclick = () => run(async () => { const value = await call('nai_generate_image', { prompt: $('prompt').value, negative_prompt: $('negative').value || undefined, style: $('generate-style').value || undefined }); $('result').textContent = '已保存：' + value.path + (value.style ? '；使用画师串：' + value.style : '；未使用画师串') })
+  run(async () => { await refreshToken(); await refreshStyles() })
+})()
+</script>
+</body>
+</html>

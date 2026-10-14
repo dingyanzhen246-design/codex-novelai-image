@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "novelai_image": {
+      "command": "node",
+      "args": ["${PLUGIN_ROOT}/server.mjs"],
+      "cwd": "${PLUGIN_ROOT}"
+    }
+  }
+}
