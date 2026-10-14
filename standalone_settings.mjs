@@ -16,6 +16,13 @@ const text = (value) => typeof value === 'string' ? value : ''
 const libraryPath = () => resolve(process.env.NAI_LIBRARY_FILE || join(process.env.NAI_LIBRARY_DIR || dirname(DEFAULT_LIBRARY), 'artists.json'))
 const makeId = () => `style-${randomUUID().replaceAll('-', '').slice(0, 12)}`
 
+process.on('uncaughtException', (error) => {
+  console.error(`NovelAI 设置服务未捕获异常：${error instanceof Error ? error.stack || error.message : String(error)}`)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error(`NovelAI 设置服务未处理拒绝：${reason instanceof Error ? reason.stack || reason.message : String(reason)}`)
+})
+
 function normalizeStyle(value) {
   if (!value || typeof value !== 'object' || !text(value.name).trim()) return null
   return { id: text(value.id) || makeId(), name: text(value.name).trim(), group: text(value.group).trim() || 'Default', artistText: typeof value.artistText === 'string' ? value.artistText : undefined, artists: Array.isArray(value.artists) ? value.artists : [], basePrompt: text(value.basePrompt), prompt: text(value.prompt), negativePrompt: text(value.negativePrompt), source: text(value.source) || 'local', createdAt: text(value.createdAt) || new Date().toISOString() }
@@ -145,4 +152,10 @@ const server = createServer(async (request, response) => {
   }
 })
 
+server.on('clientError', (_error, socket) => socket.destroy())
+server.on('connection', (socket) => socket.on('error', () => {}))
+server.on('error', (error) => console.error(`NovelAI 设置服务网络错误：${error instanceof Error ? error.stack || error.message : String(error)}`))
+server.keepAliveTimeout = 30_000
+server.headersTimeout = 35_000
 server.listen(PORT, HOST, () => console.log(`NovelAI 设置窗口：http://${HOST}:${PORT}/`))
+
