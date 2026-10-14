@@ -1,4 +1,6 @@
 import { randomInt, randomUUID } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -12,6 +14,41 @@ const DEFAULT_LIBRARY = join(PLUGIN_DIR, 'artists.json')
 const MODELS = new Set(['nai-diffusion-5-full', 'nai-diffusion-5-curated', 'nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated'])
 const PNG_SIGNATURE = Buffer.from('89504e470d0a1a0a', 'hex')
 const publicDir = PLUGIN_DIR
+
+function configureProxy() {
+  if (process.env.NAI_PROXY && !process.env.HTTPS_PROXY) process.env.HTTPS_PROXY = process.env.NAI_PROXY
+  if (process.env.NAI_PROXY && !process.env.HTTP_PROXY) process.env.HTTP_PROXY = process.env.NAI_PROXY
+  if (process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.platform !== 'win32') {
+    process.env.NODE_USE_ENV_PROXY = '1'
+    return
+  }
+  try {
+    const output = execFileSync('reg.exe', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'], { encoding: 'utf8', windowsHide: true })
+    const enabled = /ProxyEnable\s+REG_DWORD\s+0x1/i.test(output)
+    const match = output.match(/ProxyServer\s+REG_SZ\s+([^\r\n]+)/i)
+    if (enabled && match?.[1]?.trim()) {
+      const raw = match[1].trim()
+      const https = raw.match(/(?:^|;)https=([^;]+)/i)?.[1] || raw.match(/(?:^|;)http=([^;]+)/i)?.[1] || raw
+      const proxy = https.includes('://') ? https : `http://${https}`
+      process.env.HTTPS_PROXY = proxy
+      process.env.HTTP_PROXY = proxy
+    }
+  } catch {
+    // Fall back to direct access when the platform has no readable proxy setting.
+  }
+  process.env.NODE_USE_ENV_PROXY = '1'
+}
+
+configureProxy()
+
+if (process.env.NAI_PROXY_BOOTSTRAPPED !== '1' && (process.env.HTTPS_PROXY || process.env.HTTP_PROXY)) {
+  const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), ...process.argv.slice(2)], {
+    env: { ...process.env, NAI_PROXY_BOOTSTRAPPED: '1', NODE_USE_ENV_PROXY: '1' },
+    stdio: 'inherit',
+    windowsHide: true,
+  })
+  process.exit(child.status ?? 1)
+}
 
 const text = (value) => typeof value === 'string' ? value : ''
 const libraryPath = () => resolve(process.env.NAI_LIBRARY_FILE || join(process.env.NAI_LIBRARY_DIR || dirname(DEFAULT_LIBRARY), 'artists.json'))
@@ -277,3 +314,4 @@ process.stdin.on('data', (chunk) => {
     Promise.resolve().then(() => dispatch(JSON.parse(line))).then((response) => { if (response) send(response) }).catch((cause) => send(errorResult(null, -32700, cause instanceof Error ? cause.message : String(cause))))
   }
 })
+
